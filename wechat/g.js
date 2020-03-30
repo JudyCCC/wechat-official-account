@@ -9,7 +9,7 @@ const util = require('./util')
 
 module.exports = function(opts) {
   // 实例化构造函数
-  // const wechat = new Wechat(opts)
+  const wechat = new Wechat(opts)
   return function *(next) {
     const that = this
     const token = opts.token
@@ -20,6 +20,7 @@ module.exports = function(opts) {
     const str = [token, timestamp, nonce].sort().join('')
     const sha = sha1(str)
   
+    console.log('this.method' + this.method )
     if (this.method === 'GET') {
       if (sha === signature) {
         this.body = echostr + ''
@@ -40,32 +41,9 @@ module.exports = function(opts) {
       })
       const content = yield util.parseXMLAsync(data)
       const message = util.formatMessage(content.xml)
-      if (message.MsgType === 'event') {
-        if (message.Event === 'subscribe') {
-          const now = new Date().getTime()
-          that.status = 200
-          that.type = 'application/xml'
-          console.log(111)
-          // that.body = `
-          // <xml>
-          //   <ToUserName><![CDATA[${message.FromUserName}]]></ToUserName>
-          //   <FromUserName><![CDATA[${message.ToUserName}]]></FromUserName>
-          //   <CreateTime>${now}</CreateTime>
-          //   <MsgType><![CDATA[text]]></MsgType>
-          //   <Content><![CDATA[HI,thank you for your subscribe]]></Content>
-          // </xml>`
-          that.body = '<xml>' +
-         '<ToUserName><![CDATA[' + message.FromUserName + ']]></ToUserName>' +
-          '<FromUserName><![CDATA[' + message.ToUserName + ']]></FromUserName>' +
-          '<CreateTime>' + now + '</CreateTime>' +
-          '<MsgType><![CDATA[text]]></MsgType>' +
-          '<Content><![CDATA[HI,thank you for your subscribe]]></Content>' +
-        '</xml>'
-          console.log(that.body)
-          console.log(222)
-          return 
-        }
-      }
+      this.weixin = message
+      yield handler.call(this, next)
+      wechat.reply.call(this)
     }
   }
 }
