@@ -258,8 +258,58 @@ exports.reply = function* (next) {
       const msgData = yield wechatApi.checkMass('')
       console.log(msgData)
       reply = 'suc!'
+    } else if (content === '18') {
+      // 跑不通的
+      // 临时的
+      const tempQr = {
+        expire_seconds: 40000,
+        action_name: 'QR_SCENE',
+        action_info: {
+          scene: {
+            scene_id: 123
+          }
+        }
+      }
+      // 永久的
+      const permQr = {
+        action_name: 'QR_LIMIT_SCENE',
+        action_info: {
+          scene: {
+            scene_id: 123
+          }
+        }
+      }
+      const permStrQr = {
+        action_name: 'QR_LIMIT_STR_SCENE',
+        action_info: {
+          scene: {
+            scene_str: 'abc'
+          }
+        }
+      }
+      const qr1 = yield wechatApi.createQrcode(tempQr)
+      const qr2 = yield wechatApi.createQrcode(permQr)
+      const qr3 = yield wechatApi.createQrcode(permStrQr)
+
+      reply = 'Yeah'
+    } else if (content === '19') {
+      // 短链接能提高支付成功率
+      const longUrl = 'https://www.imooc.com/'
+      const shortData = yield wechatApi.createShorturl(null, longUrl)
+
+      reply = shortData.short_url
+    } else if (content === '19') {
+      // 跑不通需要认证过的服务号
+      const semanticData = {
+        "query":"寻龙诀",
+        "city":"杭州",
+        "category": "movie",
+        "uid":"123456"
+      }
+      const _semanticData = yield wechatApi.semantic(semanticData)
+      reply = JSON.stringify(_semanticData);
     }
   }
   this.body = reply
   yield next
-}
+} 

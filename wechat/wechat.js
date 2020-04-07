@@ -6,9 +6,12 @@ const fs = require('fs')
 const _ = require('lodash')
 const util = require('./util')
 
-const prefix = 'https://api.weixin.qq.com/cgi-bin/'
+const prefix = 'https://api.weixin.qq.com/cgi-bin'
+const mpPrefix = 'https://mp.weixin.qq.com/cgi-bin'
+const semanticPrefix = 'https://api.weixin.qq.com/semantic/search?'
 const api = {
   accessToken: `${prefix}token?grant_type=client_credential`,
+  semanticPrefix,
   // 临时素材上传格式
   temporary: {
     upload: `${prefix}/media/upload?`,
@@ -53,7 +56,16 @@ const api = {
     fetch: `${prefix}/menu/get??`,
     del: `${prefix}/menu/delete?`,
     current: `${prefix}/get_current_selfmenu_info?`,
-    // create: `${prefix}/menu/create?`,
+  },
+  qrcode: {
+    create: `${prefix}/qrcode/create?`,
+    show: `${mpPrefix}/showqrcode?`,
+  },
+  shortUrl: {
+    create: `${prefix}/shorturl?`,
+  },
+  ticket: {
+    fetch: `${prefix}/ticket/getticket?`,
   }
 }
 
@@ -70,18 +82,15 @@ function Wechat(opts) {
   this.appSecret = opts.appSecret
   this.getAccessToken = opts.getAccessToken
   this.saveAccessToken = opts.saveAccessToken
+  this.getTicket = opts.getTicket
+  this.saveTicket = opts.saveTicket
   this.fetchAccessToken()
 }
 
 Wechat.prototype.fetchAccessToken = function(data) {
   const that = this
-  // 如果有token且有效
-  if (this.access_token && this.expires_in) {
-    if (this.isValidAccessToken(this)) {
-      return Promise.resolve(this)
-    }
-  }
-  this.getAccessToken().then(function(data) {
+
+  return this.getAccessToken().then(function(data) {
     // 获取token
     try {
       // 获取到token，往下验证合法性
@@ -106,6 +115,35 @@ Wechat.prototype.fetchAccessToken = function(data) {
   })
 }
 
+/**
+ * 获取api_ticket 
+ */
+Wechat.prototype.fetchTicket = function(access_token) {
+  const that = this
+  
+  return this.fetchTicket().then(function(data) {
+    // 获取token
+    try {
+      // 获取到token，往下验证合法性
+      data = JSON.parse(data)
+    } catch (e) {
+      // 没有获取到token，更新token，返回的是一个Promise，直接进入then
+      return that.updateTicket(access_token)
+    }
+    // 就算拿到票据也要验证合法性
+    if(that.isValidTicket(data)) {
+      // 如果合法，向下传递
+      return Promise.resolve(data)
+    } else {
+      // 如果不合法，重新更新
+      return that.updateTicket(access_token)
+    }
+  }).then(function(data) {
+    that.saveTicket(data)
+    return Promise.resolve(data)
+  })
+}
+
 Wechat.prototype.isValidAccessToken = function(data) {
   if (!data || !data.access_token || !data.expires_in) {
     return false
@@ -114,6 +152,19 @@ Wechat.prototype.isValidAccessToken = function(data) {
   const expires_in = data.expires_in
   const now = (new Date().getTime())
   if (now < expires_in) {
+    return true
+  }
+  return false
+}
+
+Wechat.prototype.isValidTicket = function(data) {
+  if (!data || !data.ticket || !data.expires_in) {
+    return false
+  }
+  const ticket = data.ticket
+  const expires_in = data.expires_in
+  const now = (new Date().getTime())
+  if (ticket && now < expires_in) {
     return true
   }
   return false
@@ -128,6 +179,25 @@ Wechat.prototype.updateAccessToken = function() {
   const appSecret = this.appSecret
   // 从微信服务器拿新token
   const url = `${api.accessToken}&appid=${appID}&secret=${appSecret}`
+  console.log(url)
+  return new Promise(function(resolve, reject) {
+    // request是一个发送请求的库
+    request({url, json: true}).then(function(response) {
+      const data = response.body
+      // const data = response[1]
+      const now = (new Date().getTime())
+      // 减去20秒是考虑到刷新以及服务器的延迟
+      const expires_in = now + (data.expires_in - 20) * 1000
+      // 把新的票据有效时间赋值给data
+      data.expires_in = expires_in
+      resolve(data)
+    })
+  })
+}
+
+Wechat.prototype.updateTicket = function() {
+  // 从微信服务器拿新token
+  const url = `${api.ticket.fetch}&access_token=${access_token}&type=jsapi`
   console.log(url)
   return new Promise(function(resolve, reject) {
     // request是一个发送请求的库
@@ -1004,6 +1074,99 @@ Wechat.prototype.getCurrentMenu = function() {
           resolve(_data)
         } else {
           throw new Error('get current menu fails')
+        }
+      })
+      .catch(function(err) {
+        reject(err)
+      })
+    })
+  })
+}
+
+/**
+ * 生成带参数的二维码
+ */
+Wechat.prototype.createQrcode = function(qr) {
+  const that = this
+  
+  return new Promise(function(resolve, reject) {
+    that
+    .fetchAccessToken()
+    .then(function(data) {
+      const url = `${api.qrcode.create}&access_token=${data.access_token}`
+      request({method: 'POST', url, body: qr, json:true})
+      .then(function(response) {
+        const _data = response[1]
+        if(_data) {
+          resolve(_data)
+        } else {
+          throw new Error('create qrcode fails')
+        }
+      })
+      .catch(function(err) {
+        reject(err)
+      })
+    })
+  })
+}
+
+/**
+ * 通过ticket换取二维码
+ */
+Wechat.prototype.showQrcode = function(ticket) {
+  return `${api.qrcode.show}ticket=${encodeURI(ticket)}`
+}
+
+/**
+ * 长链接转短链接
+ */
+Wechat.prototype.createShorturl = function(action='long2short', url) {
+  const that = this
+  
+  return new Promise(function(resolve, reject) {
+    that
+    .fetchAccessToken()
+    .then(function(data) {
+      const url = `${api.shortUrl.create}&access_token=${data.access_token}`
+      const form = {
+        action,
+        long_url: url
+      }
+      request({method: 'POST', url, body: form, json:true})
+      .then(function(response) {
+        const _data = response[1]
+        if (_data) {
+          resolve(_data)
+        } else {
+          throw new Error('create shorturl fails')
+        }
+      })
+      .catch(function(err) {
+        reject(err)
+      })
+    })
+  })
+}
+
+/**
+ * 语义化理解
+ */
+Wechat.prototype.semantic = function(semanticData) {
+  const that = this
+  
+  return new Promise(function(resolve, reject) {
+    that
+    .fetchAccessToken()
+    .then(function(data) {
+      const url = `${api.semanticPrefix}&access_token=${data.access_token}`
+      semanticData.appid = data.appID
+      request({method: 'POST', url, body: semanticData, json:true})
+      .then(function(response) {
+        const _data = response[1]
+        if (_data) {
+          resolve(_data)
+        } else {
+          throw new Error('semantic fails')
         }
       })
       .catch(function(err) {
